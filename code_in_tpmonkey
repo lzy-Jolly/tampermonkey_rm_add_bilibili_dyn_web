@@ -1,0 +1,154 @@
+// A--copy these code and paste in tampermonkey don't copy line A and line B
+// B--辅助下面这些代码到油猴中保存，就能够添加插件，名称为--去除B站动态广告-网页版
+
+// ==UserScript==
+// @name         去除B站动态广告-网页版
+// @namespace    http://tampermonkey.net/
+// @version      2.1
+// @description  去除B站动态中的广告，匹配指定关键词和结构，支持动态加载内容
+// @author       Jolly
+// @match        https://t.bilibili.com/*
+// @license      GPL-3.0-or-later
+// @icon         data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==
+// @grant        none
+// ==/UserScript==
+
+(function() {
+    'use strict';
+
+    // 定义 keywords_list (单个关键词出现即标记为广告)
+    const keywords_list = ["双十一", "双11", "618", "淘宝"];
+
+    // 定义 keywords_list_strict (每组中的所有关键词同时出现才标记为广告)
+    const keywords_list_strict = [
+        ["转发", "评论"],
+        ["dd", "ee", "ff"]
+    ];
+
+    // 定义 datatypys，包含要检查和删除的选择器
+    const datatypys = [
+        '[data-type="goods"]',
+        '.bili-dyn-card-goods',
+
+        '.bili-dyn-item__avatar',
+        '[data-module="topic"]',
+        '.bili-dyn-item__interaction',
+        '.dyn-card-opus__pics',
+        '.bili-dyn-content__orig.reference'
+    ];//'.suit-video-card',
+
+    const processedCards = new Set();
+
+    // 检查卡片是否已加载完成
+    function isCardReady(card) {
+        const spans = card.querySelectorAll('span');
+        return spans.length > 0;
+    }
+
+    // 处理单个卡片
+    function processCard(card) {
+        if (processedCards.has(card)) return;
+        processedCards.add(card);
+
+        function tryProcessCard(attemptsLeft) {
+            if (isCardReady(card)) {
+                const spans = card.querySelectorAll('span');
+                let adDetected = false;
+                let matchedid = '';
+
+                for (let span of spans) {
+                    const spanText = span.textContent;
+
+                    // a-1：检查 keywords_list 中的关键词
+                    for (let keyword of keywords_list) {
+                        if (spanText.includes(keyword)) {
+                            adDetected = true;
+                            matchedid = keyword;
+                            break;
+                        }
+                    }
+                    if (adDetected) break;
+
+                    // b-1：检查 datatypys 中的选择器
+                    for (let selector of datatypys) {
+                        if (span.matches(selector) || span.querySelector(selector)) {
+                            adDetected = true;
+                            matchedid = selector;
+                            break;
+                        }
+                    }
+                    if (adDetected) break;
+
+                    // c-1：检查 keywords_list_strict 中的关键词组
+                    for (let group of keywords_list_strict) {
+                        if (group.every(keyword => spanText.includes(keyword))) {
+                            adDetected = true;
+                            matchedid = group.join(', ');
+                            break;
+                        }
+                    }
+                    if (adDetected) break;
+                }
+
+                if (adDetected) {
+                    // 修改 bili-rich-text__content 内容
+                    const richTextContent = card.querySelector('.bili-rich-text__content');
+                    if (richTextContent) {
+                        const newContent = document.createElement('div');
+                        newContent.className = 'bili-rich-text__content';
+                        newContent.style.lineHeight = '25px';
+                        newContent.innerHTML = `<span class="virturl-start"></span><span>卡片包含广告，点击当前文字仍可跳转阅读。匹配到--${matchedid}</span>`;
+                        richTextContent.parentNode.replaceChild(newContent, richTextContent);
+                    }
+
+                    // 删除指定的元素
+                    for (let selector of datatypys) {
+                        const elements = card.querySelectorAll(selector);
+                        elements.forEach(el => el.remove());
+                    }
+                }
+            } else if (attemptsLeft > 0) {
+                setTimeout(() => tryProcessCard(attemptsLeft - 1), 500);
+            }
+        }
+
+        tryProcessCard(5); // 尝试最多5次
+    }
+
+    // 监听动态内容加载
+    function observeDynamicLoading() {
+        const targetNode = document.querySelector('.bili-dyn-list');
+        if (!targetNode) return;
+
+        const config = { childList: true, subtree: true };
+
+        const callback = function(mutationsList, observer) {
+            mutationsList.forEach(mutation => {
+                if (mutation.type === 'childList') {
+                    mutation.addedNodes.forEach(node => {
+                        if (node.nodeType === Node.ELEMENT_NODE && node.classList.contains('bili-dyn-list__item')) {
+                            processCard(node);
+                        } else if (node.nodeType === Node.ELEMENT_NODE) {
+                            const cards = node.querySelectorAll('.bili-dyn-list__item');
+                            cards.forEach(card => processCard(card));
+                        }
+                    });
+                }
+            });
+        };
+
+        const observer = new MutationObserver(callback);
+        observer.observe(targetNode, config);
+    }
+
+    // 初始化处理
+    function init() {
+        const cards = document.querySelectorAll('.bili-dyn-list__item');
+        cards.forEach(card => processCard(card));
+
+        observeDynamicLoading();
+    }
+
+    window.addEventListener('load', init);
+
+})();
