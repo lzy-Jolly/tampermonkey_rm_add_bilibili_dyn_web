@@ -1,0 +1,2 @@
+# tampermonkey_rm_add_bilibili_dyn_web
+去除B站动态中的广告，匹配指定关键词和结构，支持动态加载内容
